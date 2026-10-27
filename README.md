@@ -44,8 +44,8 @@ The MateLabs "Scope" style (`docs/matelabs-visual-style.md` in Boom-And-Lav Sync
 
 Requires Xcode 16 or later and iOS 17 or later on the phone.
 
-1. Open `InchConverter.xcodeproj`.
-2. Select the **InchConverter** target → **Signing & Capabilities** → choose your **Team**. If Xcode reports the bundle identifier `io.github.soundiego.InchConverter` is unavailable, change it to something unique.
+1. Open `InchConverter.xcodeproj`. The **InchConverter** scheme is shared in the project, so it shows in the toolbar.
+2. Signing uses team `KJP2572BS8` (the same as RepMate) and the bundle identifier `com.sm.InchConverter`, set in the project. Check them under the **InchConverter** target → **Signing & Capabilities** if Xcode reports a signing problem.
 3. Connect the iPhone, select it as the run destination and press **Run** (⌘R).
 
 ## Code
