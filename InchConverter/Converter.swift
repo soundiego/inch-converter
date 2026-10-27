@@ -11,6 +11,7 @@ enum FieldState {
 enum NumpadKey: Hashable {
     case digit(Int)
     case separator
+    case feet
     case delete
     case enter
 }
@@ -51,6 +52,11 @@ struct MixedFraction: Equatable {
         }
     }
 
+    /// The whole value in steps of 1/`denominator`.
+    var units: Int {
+        whole * denominator + numerator
+    }
+
     var value: Double {
         Double(whole) + Double(numerator) / Double(denominator)
     }
@@ -79,7 +85,7 @@ private func gcd(_ a: Int, _ b: Int) -> Int {
 /// edits it, so keys append to the current value. Enter recalculates the other fields.
 struct Converter {
     static let centimetersPerInch = 2.54
-    static let maxDraftLength = 12
+    static let maxDraftLength = 16
 
     private(set) var inches: Double = 1
     private(set) var activeField: Field = .inches
@@ -89,6 +95,8 @@ struct Converter {
     var precision = 16 {
         didSet { enteredFraction = nil }
     }
+    /// Shows the two inch fields as feet and inches (5' 3.25") instead of inches alone.
+    var showsFeet = false
     /// The fraction as the user typed it, shown instead of the rounded one until the value
     /// or the precision changes.
     private var enteredFraction: MixedFraction?
@@ -116,14 +124,24 @@ struct Converter {
     }
 
     /// For the fraction field the separator key types the space after the whole number,
-    /// then the fraction slash: 3, ␣, 5, /, 8 gives "3 5/8".
+    /// then the fraction slash: 3, Space, 5, /, 8 gives "3 5/8".
     var separatorKeyLabel: String {
         guard activeField == .fraction else { return decimalSeparator }
-        return separatorInsertion == "/" ? "/" : "␣"
+        return separatorInsertion == "/" ? "/" : "Space"
     }
 
     var separatorKeyEnabled: Bool {
         separatorInsertion != nil
+    }
+
+    /// The Feet key is on the numpad for the inch fields while feet are shown.
+    var feetKeyShown: Bool {
+        showsFeet && activeField != .centimeters
+    }
+
+    /// The feet mark follows a whole number typed first: 5, Feet, 3 gives 5' 3".
+    var feetKeyEnabled: Bool {
+        feetKeyShown && isEditing && !draft.isEmpty && draft.allSatisfy(\.isNumber)
     }
 
     mutating func select(_ field: Field) {
@@ -135,7 +153,7 @@ struct Converter {
     /// Starts editing the field's current value instead of replacing it.
     mutating func edit(_ field: Field) {
         activeField = field
-        draft = formatted(field)
+        draft = editable(field)
         isEditing = true
     }
 
@@ -148,6 +166,7 @@ struct Converter {
         switch key {
         case .digit(let digit): type(String(digit))
         case .separator: typeSeparator()
+        case .feet: typeFeet()
         case .delete: deleteBackward()
         case .enter: commit()
         }
@@ -159,16 +178,42 @@ struct Converter {
 
     private func formatted(_ field: Field) -> String {
         switch field {
-        case .inches: return decimal(inches)
-        case .fraction: return (enteredFraction ?? roundedFraction).text
-        case .centimeters: return decimal(inches * Self.centimetersPerInch)
+        case .inches:
+            let (feet, rest) = splitIntoFeet(Int((inches * 100).rounded()), unitsPerInch: 100)
+            return withFeet(feet, decimal(hundredths: rest))
+        case .fraction:
+            let fraction = enteredFraction ?? roundedFraction
+            let (feet, rest) = splitIntoFeet(fraction.units, unitsPerInch: fraction.denominator)
+            return withFeet(feet, MixedFraction(units: rest, denominator: fraction.denominator).text)
+        case .centimeters:
+            return decimal(hundredths: Int((inches * Self.centimetersPerInch * 100).rounded()))
         }
     }
 
-    /// Two decimals, rounding halves up (3.625 → 3.63).
-    private func decimal(_ value: Double) -> String {
-        String(format: "%.2f", (value * 100).rounded() / 100)
-            .replacingOccurrences(of: ".", with: decimalSeparator)
+    /// What holding a field starts editing from: its value without the closing inch mark.
+    private func editable(_ field: Field) -> String {
+        var text = formatted(field)
+        if text.hasSuffix("\"") { text.removeLast() }
+        return text
+    }
+
+    /// Splits a length counted in 1/`unitsPerInch` inch into whole feet and the rest, when feet
+    /// are shown. Rounding comes first, so 11.999" shows as 1' 0.00", never 0' 12.00".
+    private func splitIntoFeet(_ units: Int, unitsPerInch: Int) -> (feet: Int, rest: Int) {
+        guard showsFeet else { return (0, units) }
+        let perFoot = 12 * unitsPerInch
+        return (units / perFoot, units % perFoot)
+    }
+
+    /// 5' 3.25" with feet shown, 3.25" under a foot, or the inches alone without feet.
+    private func withFeet(_ feet: Int, _ inchesText: String) -> String {
+        guard showsFeet else { return inchesText }
+        return feet > 0 ? "\(feet)' \(inchesText)\"" : "\(inchesText)\""
+    }
+
+    /// Two decimals; rounded to hundredths beforehand, halves up (3.625 gives 3.63).
+    private func decimal(hundredths: Int) -> String {
+        "\(hundredths / 100)\(decimalSeparator)\(String(format: "%02d", hundredths % 100))"
     }
 
     private func parseDecimal(_ text: String) -> Double? {
@@ -178,9 +223,24 @@ struct Converter {
         return Double(text)
     }
 
+    /// Reads "5' 3.25" as 5 feet and "3.25"; "5'" as 5 feet and "0". Without a feet mark the
+    /// whole text is inches.
+    private func splitFeetMark(_ text: String) -> (feet: Int, inches: String)? {
+        guard let mark = text.firstIndex(of: "'") else { return (0, text) }
+        guard let feet = Int(text[..<mark]) else { return nil }
+        let rest = text[text.index(after: mark)...].trimmingCharacters(in: .whitespaces)
+        return (feet, rest.isEmpty ? "0" : rest)
+    }
+
+    /// The part of the draft after the feet mark, where the separator rules apply.
+    private var draftInches: Substring {
+        guard let mark = draft.firstIndex(of: "'") else { return Substring(draft) }
+        return draft[draft.index(after: mark)...].drop { $0 == " " }
+    }
+
     /// What the separator key would add to the draft, or nil if it can't be used now.
     private var separatorInsertion: String? {
-        let current = isEditing ? draft : ""
+        let current = isEditing ? draftInches : ""
         guard activeField == .fraction else {
             return current.contains(decimalSeparator) ? nil : decimalSeparator
         }
@@ -198,23 +258,33 @@ struct Converter {
     private mutating func type(_ digit: String) {
         startTypingIfSelected()
         guard draft.count < Self.maxDraftLength else { return }
-        draft = draft == "0" ? digit : draft + digit
+        if draftInches == "0" { draft.removeLast() }
+        draft += digit
     }
 
     private mutating func typeSeparator() {
         guard let insertion = separatorInsertion else { return }
         startTypingIfSelected()
         guard draft.count < Self.maxDraftLength else { return }
-        // Only decimal fields get here with an empty draft: "," becomes "0,".
-        if draft.isEmpty { draft = "0" }
-        // "5", ␣, ␣ gives "5/" for a fraction without a whole number.
+        // Only decimal fields get here with no inches typed: "," becomes "0,".
+        if draftInches.isEmpty { draft += "0" }
+        // "5", Space, Space gives "5/" for a fraction without a whole number.
         if insertion == "/" && draft.hasSuffix(" ") { draft.removeLast() }
         draft += insertion
     }
 
+    private mutating func typeFeet() {
+        guard feetKeyEnabled, draft.count < Self.maxDraftLength else { return }
+        draft += "' "
+    }
+
     private mutating func deleteBackward() {
         if isEditing {
-            if !draft.isEmpty { draft.removeLast() }
+            if draft.hasSuffix("' ") {
+                draft.removeLast(2)
+            } else if !draft.isEmpty {
+                draft.removeLast()
+            }
         } else {
             // The whole value is selected, so delete removes all of it.
             clear()
@@ -225,11 +295,11 @@ struct Converter {
     private mutating func commit() {
         defer { select(activeField) }
         // An unchanged draft would replace the stored value with its rounded display.
-        guard isEditing, draft != formatted(activeField) else { return }
+        guard isEditing, draft != editable(activeField) else { return }
         switch activeField {
         case .inches:
-            if let value = parseDecimal(draft) {
-                inches = value
+            if let split = splitFeetMark(draft), let value = parseDecimal(split.inches) {
+                inches = Double(split.feet * 12) + value
                 enteredFraction = nil
             }
         case .centimeters:
@@ -238,9 +308,11 @@ struct Converter {
                 enteredFraction = nil
             }
         case .fraction:
-            if let fraction = MixedFraction(parsing: draft) {
-                inches = fraction.value
-                enteredFraction = fraction
+            if let split = splitFeetMark(draft), let fraction = MixedFraction(parsing: split.inches) {
+                let exact = MixedFraction(units: split.feet * 12 * fraction.denominator + fraction.units,
+                                          denominator: fraction.denominator)
+                inches = exact.value
+                enteredFraction = exact
             }
         }
     }

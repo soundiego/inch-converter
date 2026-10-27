@@ -2,50 +2,58 @@ import SwiftUI
 
 struct ContentView: View {
     @AppStorage("fractionPrecision") private var precision = 16
+    @AppStorage("showsFeet") private var showsFeet = false
     @State private var converter = Converter()
     @State private var hapticTrigger = 0
 
     var body: some View {
-        VStack(spacing: 12) {
-            fieldRow(.inches, title: "Inches", unit: "in")
-            fieldRow(.fraction, title: "Fraction", unit: "in")
-            fieldRow(.centimeters, title: "Centimeters", unit: "cm")
+        VStack(spacing: 0) {
+            HeaderBand()
+            VStack(spacing: 10) {
+                fieldRow(.inches, title: showsFeet ? "Feet and inches" : "Inches", unit: showsFeet ? nil : "in")
+                fieldRow(.fraction, title: showsFeet ? "Feet and inches, fraction" : "Inches, fraction", unit: showsFeet ? nil : "in")
+                fieldRow(.centimeters, title: "Centimeters", unit: "cm")
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Fraction precision")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Picker("Fraction precision", selection: $precision) {
-                    ForEach([8, 16, 32, 64], id: \.self) { denominator in
-                        Text(verbatim: "1/\(denominator)").tag(denominator)
+                HStack(spacing: 10) {
+                    Picker("Inch fields", selection: $showsFeet) {
+                        Text("Inches").tag(false)
+                        Text("Feet + in").tag(true)
+                    }
+                    Picker("Fraction precision", selection: $precision) {
+                        ForEach([8, 16, 32, 64], id: \.self) { denominator in
+                            Text(verbatim: "1/\(denominator)").tag(denominator)
+                        }
                     }
                 }
                 .pickerStyle(.segmented)
+
+                Numpad(
+                    separatorLabel: converter.separatorKeyLabel,
+                    separatorEnabled: converter.separatorKeyEnabled,
+                    feetShown: converter.feetKeyShown,
+                    feetEnabled: converter.feetKeyEnabled,
+                    onKey: { converter.press($0) },
+                    onClear: {
+                        converter.clear()
+                        hapticTrigger += 1
+                    }
+                )
             }
-            .padding(.top, 4)
-
-            Spacer(minLength: 12)
-
-            Numpad(
-                separatorLabel: converter.separatorKeyLabel,
-                separatorEnabled: converter.separatorKeyEnabled,
-                onKey: { converter.press($0) },
-                onClear: {
-                    converter.clear()
-                    hapticTrigger += 1
-                }
-            )
-            .frame(maxHeight: 400)
-            .layoutPriority(1)
+            .padding(12)
         }
-        .padding()
+        .background(Theme.background.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .tint(Theme.accentDeep)
         .onChange(of: precision, initial: true) {
             converter.precision = precision
+        }
+        .onChange(of: showsFeet, initial: true) {
+            converter.showsFeet = showsFeet
         }
         .sensoryFeedback(.impact(weight: .medium), trigger: hapticTrigger)
     }
 
-    private func fieldRow(_ field: Field, title: String, unit: String) -> some View {
+    private func fieldRow(_ field: Field, title: String, unit: String?) -> some View {
         FieldRow(
             title: title,
             unit: unit,
@@ -61,9 +69,11 @@ struct ContentView: View {
     }
 }
 
+/// One of the three values: its name small at the top, the figures as large as the width allows.
 private struct FieldRow: View {
     let title: String
-    let unit: String
+    /// Nil when the figures carry their own marks (5' 3.25").
+    let unit: String?
     let text: String
     let isApproximate: Bool
     let state: FieldState
@@ -71,130 +81,129 @@ private struct FieldRow: View {
     let onLongPress: () -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             Text(title)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize()
-            Spacer(minLength: 0)
-            if isApproximate {
-                Text("≈")
-                    .foregroundStyle(.secondary)
-            }
-            HStack(spacing: 2) {
-                Text(text)
-                    .padding(.horizontal, 4)
-                    .background(
-                        state == .selected ? Color.accentColor.opacity(0.25) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6)
-                    )
-                if state == .editing {
-                    Caret()
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(state == .inactive ? Theme.dim : Theme.accent)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Spacer(minLength: 0)
+                if isApproximate {
+                    Text("≈")
+                        .foregroundStyle(Theme.dim)
+                }
+                HStack(spacing: 2) {
+                    Text(text)
+                        .padding(.horizontal, 4)
+                        .background(
+                            state == .selected ? Theme.accent.opacity(0.3) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 6)
+                        )
+                    if state == .editing {
+                        Caret()
+                    }
+                }
+                if let unit {
+                    Text(unit)
+                        .font(.system(size: 22, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Theme.dim)
                 }
             }
+            .font(.system(size: 48, weight: .medium, design: .monospaced))
             .lineLimit(1)
-            .minimumScaleFactor(0.4)
-            Text(unit)
-                .font(.title3)
-                .foregroundStyle(.secondary)
+            .minimumScaleFactor(0.3)
         }
-        .font(.system(size: 34, weight: .medium, design: .rounded).monospacedDigit())
-        .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity, minHeight: 68)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(Color.accentColor, lineWidth: state == .inactive ? 0 : 2)
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 88)
+        .themePanel(active: state != .inactive)
+        .contentShape(RoundedRectangle(cornerRadius: 10))
         .onTapGesture(perform: onTap)
         .onLongPressGesture(minimumDuration: 0.4, perform: onLongPress)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Tap to type a new number, hold to edit this one")
     }
 }
 
-/// Blinking insertion point after the text of the field being edited.
+/// Blinking insertion point after the figures of the field being edited.
 private struct Caret: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { context in
             let isVisible = Int(context.date.timeIntervalSinceReferenceDate * 2).isMultiple(of: 2)
             Rectangle()
-                .fill(Color.accentColor)
-                .frame(width: 2, height: 30)
+                .fill(Theme.accent)
+                .frame(width: 3, height: 40)
                 .opacity(isVisible ? 1 : 0)
         }
     }
 }
 
+/// Native bordered buttons that fill the rest of the screen. Enter is the one prominent button.
 private struct Numpad: View {
     let separatorLabel: String
     let separatorEnabled: Bool
+    let feetShown: Bool
+    let feetEnabled: Bool
     let onKey: (NumpadKey) -> Void
     let onClear: () -> Void
 
     var body: some View {
-        Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
             ForEach([[7, 8, 9], [4, 5, 6], [1, 2, 3]], id: \.self) { row in
                 GridRow {
                     ForEach(row, id: \.self) { digit in
-                        Button(String(digit)) { onKey(.digit(digit)) }
+                        key(String(digit), isFigure: true) { onKey(.digit(digit)) }
                     }
                 }
             }
             GridRow {
-                Button(separatorLabel) { onKey(.separator) }
+                key(separatorLabel, isFigure: separatorLabel != "Space") { onKey(.separator) }
                     .disabled(!separatorEnabled)
-                    .opacity(separatorEnabled ? 1 : 0.4)
-                    .accessibilityLabel(separatorLabel == "␣" ? "Space" : separatorLabel)
-                Button("0") { onKey(.digit(0)) }
-                DeleteKey(onDelete: { onKey(.delete) }, onClear: onClear)
+                key("0", isFigure: true) { onKey(.digit(0)) }
+                // Tap deletes the last character; hold clears the number. On release after a
+                // hold the tap also arrives, and deletes nothing from the empty number.
+                key("Delete") { onKey(.delete) }
+                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in onClear() })
+                    .accessibilityHint("Hold to clear the number")
             }
-            GridRow {
-                Button("Enter") { onKey(.enter) }
-                    .buttonStyle(KeyStyle(isProminent: true))
-                    .gridCellColumns(3)
+            if feetShown {
+                GridRow {
+                    key("Feet") { onKey(.feet) }
+                        .disabled(!feetEnabled)
+                    enterKey
+                        .gridCellColumns(2)
+                }
+            } else {
+                GridRow {
+                    enterKey
+                        .gridCellColumns(3)
+                }
             }
         }
-        .buttonStyle(KeyStyle())
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 10))
+        .tint(.white)
     }
-}
 
-/// Tap deletes the last character, hold clears the whole number.
-private struct DeleteKey: View {
-    let onDelete: () -> Void
-    let onClear: () -> Void
-    @State private var isPressed = false
-
-    var body: some View {
-        Image(systemName: "delete.left")
-            .keyAppearance(isPressed: isPressed)
-            .onTapGesture(perform: onDelete)
-            .onLongPressGesture(minimumDuration: 0.5, perform: onClear, onPressingChanged: { isPressed = $0 })
-            .accessibilityLabel("Delete")
-            .accessibilityAddTraits(.isButton)
+    private func key(_ title: String, isFigure: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(isFigure ? .system(size: 40, weight: .medium, design: .monospaced) : .system(size: 22, weight: .semibold))
+                .minimumScaleFactor(0.5)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
-}
 
-private struct KeyStyle: ButtonStyle {
-    var isProminent = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .keyAppearance(isPressed: configuration.isPressed, isProminent: isProminent)
-    }
-}
-
-private extension View {
-    func keyAppearance(isPressed: Bool, isProminent: Bool = false) -> some View {
-        self
-            .font(.system(size: 28, weight: .medium, design: .rounded))
-            .foregroundStyle(isProminent ? Color.white : Color.primary)
-            .frame(maxWidth: .infinity, minHeight: 44, maxHeight: .infinity)
-            .background(
-                isProminent ? Color.accentColor : Color(uiColor: .secondarySystemBackground),
-                in: RoundedRectangle(cornerRadius: 12)
-            )
-            .opacity(isPressed ? 0.5 : 1)
-            .contentShape(RoundedRectangle(cornerRadius: 12))
+    private var enterKey: some View {
+        Button {
+            onKey(.enter)
+        } label: {
+            Text("Enter")
+                .font(.system(size: 24, weight: .semibold))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Theme.accentDeep)
     }
 }
 
