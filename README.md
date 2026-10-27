@@ -5,7 +5,8 @@ iPhone app that converts between decimal inches, fractional inches and centimete
 ## Using it
 
 - **Tap a field** to select it. The first key you press replaces the whole number.
-- **Hold a field** to edit it in place: a cursor appears (with a haptic tap) and follows your finger as you slide along the number. Keys go in at the cursor, and ⌫ deletes the character before it. Holding the field you are editing again moves the cursor without losing what you typed.
+- **Hold a field** (half a second, iOS's usual hold) to edit it in place: a cursor appears under your finger, with a haptic tap, and follows it as you slide along the number. Keys go in at the cursor, and ⌫ deletes the character before it. Holding the field you are editing again moves the cursor without losing what you typed.
+- **Hold the keypad** (any key but ⌫) and it becomes a trackpad, as on the iPhone keyboard: the keys fade, nothing is typed, and sliding left or right moves the cursor in the selected field, one character every 12 points.
 - **The other two fields follow every key** you type, so there is nothing to press to convert. On the way to `2 7/16` they briefly show `2 7/1` (9"); input that can't be read yet, such as `3 5/`, leaves them at the last value they could read.
 - **=** ends typing and shows the field in full (`2.5` becomes `2.50`, `3 6/8` becomes `3 3/4`). During a sum, = shows the total.
 - **⌫ (Delete)**: tap removes the character before the cursor, hold empties all three fields (during a sum: the length being typed, and the others go back to the subtotal).
@@ -64,4 +65,5 @@ Requires Xcode 16 or later and iOS 17 or later on the phone.
 
 - `InchConverter/Converter.swift`: conversion, feet, fraction rounding and parsing, the numpad editing rules with the cursor, the sum and its history. Uses only Foundation.
 - `InchConverter/ContentView.swift`: the screen, fields (with the cursor), sum line and tape, and numpad.
+- `InchConverter/HoldToMoveCursor.swift`: the hold on a field or on the keypad that moves the cursor (a UIKit long press on the window).
 - `InchConverter/Theme.swift`: colours, header band, panels.

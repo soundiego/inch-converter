@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @AppStorage("fractionPrecision") private var precision = 16
@@ -8,6 +9,16 @@ struct ContentView: View {
     @State private var converter = Converter()
     @State private var hapticTrigger = 0
     @State private var showsTape = false
+    /// Where the fields and keys are, for holding to move the cursor.
+    @State private var touchFrames: [String: CGRect] = [:]
+    /// What is being held: a field (the cursor under the finger) or the keypad (a trackpad).
+    @State private var hold: HoldTarget?
+    /// Where a trackpad hold started, and the cursor then.
+    @State private var trackpadStart: (x: CGFloat, cursor: Int)?
+    @State private var holdEndedAt = Date.distantPast
+
+    /// Finger travel on the keypad that moves the cursor one character.
+    private static let trackpadStep: CGFloat = 12
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,15 +53,35 @@ struct ContentView: View {
                     separatorEnabled: converter.separatorKeyEnabled,
                     feetShown: converter.feetKeyShown,
                     feetEnabled: converter.feetKeyEnabled,
-                    onKey: { converter.press($0) },
+                    onKey: { key in
+                        if !holdIsRecent { converter.press(key) }
+                    },
                     onClear: {
                         converter.clear()
                         hapticTrigger += 1
                     }
                 )
+                // As trackpad, the keys fade, as the iPhone keyboard's do.
+                .opacity(hold == .keypad ? 0.3 : 1)
+                .animation(.easeOut(duration: 0.15), value: hold)
+                .reportsTouchFrame("keypad")
             }
             .padding(12)
         }
+        .background {
+            HoldToMoveCursor(
+                frames: touchFrames,
+                isEnabled: !showsTape,
+                onBegin: { target, point in beginHold(target, at: point) },
+                onMove: { target, point in moveHold(target, to: point) },
+                onEnd: {
+                    hold = nil
+                    trackpadStart = nil
+                    holdEndedAt = Date()
+                }
+            )
+        }
+        .onPreferenceChange(TouchFramesKey.self) { touchFrames = $0 }
         .background(Theme.background.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .tint(Theme.accentDeep)
@@ -78,6 +109,7 @@ struct ContentView: View {
 
     private func fieldRow(_ field: Field, title: String, unit: String?) -> some View {
         FieldRow(
+            field: field,
             title: title,
             note: converter.note(for: field),
             unit: unit,
@@ -85,13 +117,60 @@ struct ContentView: View {
             isApproximate: converter.isApproximate(field),
             state: converter.state(of: field),
             cursor: converter.cursor,
-            onTap: { converter.select(field) },
-            onBeginCursor: {
-                converter.edit(field)
-                hapticTrigger += 1
+            characterWidth: characterWidth(in: field),
+            onTap: {
+                if !holdIsRecent { converter.select(field) }
             },
-            onMoveCursor: { converter.moveCursor(to: $0) }
+            onEdit: { converter.edit(field) }
         )
+    }
+
+    // MARK: Holding to move the cursor
+
+    /// True while a hold goes on and just after: the key or field under the finger must not
+    /// also take the touch as a tap when it ends.
+    private var holdIsRecent: Bool {
+        hold != nil || Date().timeIntervalSince(holdEndedAt) < 0.35
+    }
+
+    private func beginHold(_ target: HoldTarget, at point: CGPoint) {
+        hold = target
+        hapticTrigger += 1
+        switch target {
+        case .field(let field):
+            converter.edit(field)
+            converter.moveCursor(to: cursorIndex(in: field, at: point.x))
+        case .keypad:
+            converter.edit(converter.activeField)
+            trackpadStart = (point.x, converter.cursor)
+        }
+    }
+
+    private func moveHold(_ target: HoldTarget, to point: CGPoint) {
+        switch target {
+        case .field(let field):
+            converter.moveCursor(to: cursorIndex(in: field, at: point.x))
+        case .keypad:
+            guard let start = trackpadStart else { return }
+            converter.moveCursor(to: start.cursor + Int((point.x - start.x) / Self.trackpadStep))
+        }
+    }
+
+    /// The cursor position nearest to `x` (window coordinates) in the field's figures.
+    private func cursorIndex(in field: Field, at x: CGFloat) -> Int {
+        let width = characterWidth(in: field)
+        guard width > 0, let frame = touchFrames["text-\(field.rawValue)"] else { return converter.cursor }
+        return Int(((x - frame.minX - FieldRow.textPadding) / width).rounded())
+    }
+
+    /// The width of one character of the field's figures, which are in a fixed-width font.
+    private func characterWidth(in field: Field) -> CGFloat {
+        let count = converter.text(for: field).count
+        guard count > 0 else { return 0 }
+        if let frame = touchFrames["text-\(field.rawValue)"], frame.width > 2 * FieldRow.textPadding {
+            return (frame.width - 2 * FieldRow.textPadding) / CGFloat(count)
+        }
+        return FieldRow.fallbackCharacterWidth
     }
 
     /// The sum line's rows, oldest first: the finished sums, then the sum running now, or the
@@ -110,8 +189,10 @@ struct ContentView: View {
 }
 
 /// One of the three values: its name small at the top, the figures as large as the width
-/// allows. Tap to type a new number; hold to get a cursor, and slide to move it.
+/// allows. Tap to type a new number; hold to get a cursor and slide to move it (the hold
+/// itself is `HoldToMoveCursor`).
 private struct FieldRow: View {
+    let field: Field
     let title: String
     /// Subtotal or total during a sum, and how the figures were rounded.
     let note: String?
@@ -122,16 +203,16 @@ private struct FieldRow: View {
     let state: FieldState
     /// Where the caret is while editing, in characters.
     let cursor: Int
+    let characterWidth: CGFloat
     let onTap: () -> Void
-    let onBeginCursor: () -> Void
-    let onMoveCursor: (Int) -> Void
+    let onEdit: () -> Void
 
-    /// The figures' frame, to find the character under the finger.
-    @State var textFrame = CGRect.zero
-    @State var cursorGestureBegan = false
-
-    private static let space = "field"
-    private static let textPadding: CGFloat = 4
+    static let textPadding: CGFloat = 4
+    /// One character of the figures at full size, until the figures have been measured.
+    static let fallbackCharacterWidth: CGFloat = {
+        let font = UIFont.monospacedSystemFont(ofSize: 48, weight: .medium)
+        return ("0" as NSString).size(withAttributes: [.font: font]).width
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -161,11 +242,7 @@ private struct FieldRow: View {
                         state == .selected ? Theme.accent.opacity(0.3) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 6)
                     )
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear.preference(key: TextFrameKey.self, value: proxy.frame(in: .named(Self.space)))
-                        }
-                    }
+                    .reportsTouchFrame("text-\(field.rawValue)")
                     .overlay(alignment: .leading) {
                         if state == .editing {
                             Caret()
@@ -186,60 +263,13 @@ private struct FieldRow: View {
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, minHeight: 88)
         .themePanel(active: state != .inactive)
-        .onPreferenceChange(TextFrameKey.self) { textFrame = $0 }
         .contentShape(RoundedRectangle(cornerRadius: 10))
-        .gesture(cursorGesture.exclusively(before: TapGesture().onEnded { onTap() }))
-        .coordinateSpace(.named(Self.space))
+        .onTapGesture { onTap() }
+        .reportsTouchFrame("row-\(field.rawValue)")
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Tap to type a new number, hold to edit this one")
-        .accessibilityAction { onTap() }
-        .accessibilityAction(named: "Edit") { onBeginCursor() }
-    }
-
-    /// The width of one character: the figures are in a fixed-width font.
-    private var characterWidth: CGFloat {
-        text.isEmpty ? 0 : max(textFrame.width - 2 * Self.textPadding, 0) / CGFloat(text.count)
-    }
-
-    /// The cursor position nearest to `x`, in the row's coordinates.
-    private func cursorIndex(at x: CGFloat) -> Int {
-        guard characterWidth > 0 else { return 0 }
-        return Int(((x - textFrame.minX - Self.textPadding) / characterWidth).rounded())
-    }
-
-    /// Hold to edit in place, then slide the finger to move the cursor. The haptic tap comes
-    /// when the cursor appears, as the finger is still down.
-    private var cursorGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.4)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space)))
-            .onChanged { value in
-                switch value {
-                case .first:
-                    cursorGestureBegan = false
-                case .second(true, let drag):
-                    if !cursorGestureBegan {
-                        cursorGestureBegan = true
-                        onBeginCursor()
-                    }
-                    if let drag {
-                        onMoveCursor(cursorIndex(at: drag.location.x))
-                    }
-                default:
-                    break
-                }
-            }
-            .onEnded { _ in
-                cursorGestureBegan = false
-            }
-    }
-}
-
-private struct TextFrameKey: PreferenceKey {
-    static let defaultValue = CGRect.zero
-
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
+        .accessibilityAction(named: "Edit") { onEdit() }
     }
 }
 
@@ -591,6 +621,8 @@ private struct Numpad: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in onClear() })
+        // Its hold empties the fields, so the keypad's trackpad leaves it alone.
+        .reportsTouchFrame("delete")
         .accessibilityLabel("Delete")
         .accessibilityHint("Hold to empty all three fields")
     }
