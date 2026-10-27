@@ -3,6 +3,8 @@ import SwiftUI
 struct ContentView: View {
     @AppStorage("fractionPrecision") private var precision = 16
     @AppStorage("showsFeet") private var showsFeet = false
+    /// The last finished sums, kept between launches.
+    @AppStorage("history") private var savedHistory = Data()
     @State private var converter = Converter()
     @State private var hapticTrigger = 0
     @State private var showsTape = false
@@ -29,8 +31,8 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
 
                 TapeLine(
-                    expression: converter.tapeExpression,
-                    total: converter.tapeTotal,
+                    rows: tapeRows,
+                    showsClear: !converter.tape.isEmpty,
                     onOpen: { showsTape = true },
                     onClear: { converter.clearSum() }
                 )
@@ -58,10 +60,18 @@ struct ContentView: View {
         .onChange(of: showsFeet, initial: true) {
             converter.showsFeet = showsFeet
         }
+        .onAppear {
+            if let history = try? JSONDecoder().decode([Calculation].self, from: savedHistory) {
+                converter.restoreHistory(history)
+            }
+        }
+        .onChange(of: converter.history) {
+            savedHistory = (try? JSONEncoder().encode(converter.history)) ?? Data()
+        }
         .sensoryFeedback(.impact(weight: .medium), trigger: hapticTrigger)
         .sheet(isPresented: $showsTape) {
             TapeSheet(converter: converter, showsFeet: showsFeet) {
-                converter.clearSum()
+                converter.clearHistory()
             }
         }
     }
@@ -72,29 +82,56 @@ struct ContentView: View {
             note: converter.note(for: field),
             unit: unit,
             text: converter.text(for: field),
-            isApproximate: field == .fraction && converter.fractionIsApproximate,
+            isApproximate: converter.isApproximate(field),
             state: converter.state(of: field),
+            cursor: converter.cursor,
             onTap: { converter.select(field) },
-            onLongPress: {
+            onBeginCursor: {
                 converter.edit(field)
                 hapticTrigger += 1
-            }
+            },
+            onMoveCursor: { converter.moveCursor(to: $0) }
         )
+    }
+
+    /// The sum line's rows, oldest first: the finished sums, then the sum running now, or the
+    /// hint when none is.
+    private var tapeRows: [TapeRow] {
+        var rows = converter.history.enumerated().map { index, calculation in
+            TapeRow(id: "history-\(index)", expression: calculation.expression, total: calculation.total)
+        }
+        if converter.pendingSign != nil, let expression = converter.tapeExpression {
+            rows.append(TapeRow(id: "running", expression: expression, total: nil))
+        } else if !converter.sumFinished {
+            rows.append(TapeRow(id: "hint", expression: nil, total: nil))
+        }
+        return rows
     }
 }
 
-/// One of the three values: its name small at the top, the figures as large as the width allows.
+/// One of the three values: its name small at the top, the figures as large as the width
+/// allows. Tap to type a new number; hold to get a cursor, and slide to move it.
 private struct FieldRow: View {
     let title: String
-    /// Subtotal or total during a sum, and how the fraction was rounded.
+    /// Subtotal or total during a sum, and how the figures were rounded.
     let note: String?
     /// Nil when the figures carry their own marks (5' 3.25").
     let unit: String?
     let text: String
     let isApproximate: Bool
     let state: FieldState
+    /// Where the caret is while editing, in characters.
+    let cursor: Int
     let onTap: () -> Void
-    let onLongPress: () -> Void
+    let onBeginCursor: () -> Void
+    let onMoveCursor: (Int) -> Void
+
+    /// The figures' frame, to find the character under the finger.
+    @State var textFrame = CGRect.zero
+    @State var cursorGestureBegan = false
+
+    private static let space = "field"
+    private static let textPadding: CGFloat = 4
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -118,17 +155,23 @@ private struct FieldRow: View {
                     Text("≈")
                         .foregroundStyle(Theme.dim)
                 }
-                HStack(spacing: 2) {
-                    Text(text)
-                        .padding(.horizontal, 4)
-                        .background(
-                            state == .selected ? Theme.accent.opacity(0.3) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 6)
-                        )
-                    if state == .editing {
-                        Caret()
+                Text(text)
+                    .padding(.horizontal, Self.textPadding)
+                    .background(
+                        state == .selected ? Theme.accent.opacity(0.3) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: TextFrameKey.self, value: proxy.frame(in: .named(Self.space)))
+                        }
                     }
-                }
+                    .overlay(alignment: .leading) {
+                        if state == .editing {
+                            Caret()
+                                .offset(x: Self.textPadding + CGFloat(cursor) * characterWidth - 1.5)
+                        }
+                    }
                 if let unit {
                     Text(unit)
                         .font(.system(size: 22, weight: .medium, design: .monospaced))
@@ -143,16 +186,64 @@ private struct FieldRow: View {
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, minHeight: 88)
         .themePanel(active: state != .inactive)
+        .onPreferenceChange(TextFrameKey.self) { textFrame = $0 }
         .contentShape(RoundedRectangle(cornerRadius: 10))
-        .onTapGesture(perform: onTap)
-        .onLongPressGesture(minimumDuration: 0.4, perform: onLongPress)
+        .gesture(cursorGesture.exclusively(before: TapGesture().onEnded { onTap() }))
+        .coordinateSpace(.named(Self.space))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Tap to type a new number, hold to edit this one")
+        .accessibilityAction { onTap() }
+        .accessibilityAction(named: "Edit") { onBeginCursor() }
+    }
+
+    /// The width of one character: the figures are in a fixed-width font.
+    private var characterWidth: CGFloat {
+        text.isEmpty ? 0 : max(textFrame.width - 2 * Self.textPadding, 0) / CGFloat(text.count)
+    }
+
+    /// The cursor position nearest to `x`, in the row's coordinates.
+    private func cursorIndex(at x: CGFloat) -> Int {
+        guard characterWidth > 0 else { return 0 }
+        return Int(((x - textFrame.minX - Self.textPadding) / characterWidth).rounded())
+    }
+
+    /// Hold to edit in place, then slide the finger to move the cursor. The haptic tap comes
+    /// when the cursor appears, as the finger is still down.
+    private var cursorGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.4)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space)))
+            .onChanged { value in
+                switch value {
+                case .first:
+                    cursorGestureBegan = false
+                case .second(true, let drag):
+                    if !cursorGestureBegan {
+                        cursorGestureBegan = true
+                        onBeginCursor()
+                    }
+                    if let drag {
+                        onMoveCursor(cursorIndex(at: drag.location.x))
+                    }
+                default:
+                    break
+                }
+            }
+            .onEnded { _ in
+                cursorGestureBegan = false
+            }
     }
 }
 
-/// Blinking insertion point after the figures of the field being edited.
+private struct TextFrameKey: PreferenceKey {
+    static let defaultValue = CGRect.zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+/// Blinking insertion point in the figures of the field being edited.
 private struct Caret: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { context in
@@ -165,44 +256,47 @@ private struct Caret: View {
     }
 }
 
-/// The sum on one line, always there so nothing moves when a sum starts. The end stays in
-/// sight; a tap shows the whole sum.
-private struct TapeLine: View {
+/// One line of the sum line: a finished sum with its total, the sum running now, or the hint.
+private struct TapeRow: Identifiable, Equatable {
+    let id: String
+    /// Nil for the hint.
     let expression: String?
     let total: String?
+}
+
+/// The sums on one line, always there so nothing moves when a sum starts. Swipe down for the
+/// earlier ones (up to 10); a tap shows the whole tape.
+private struct TapeLine: View {
+    let rows: [TapeRow]
+    let showsClear: Bool
     let onOpen: () -> Void
     let onClear: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            if let expression {
-                Button(action: onOpen) {
-                    HStack(spacing: 6) {
-                        Text(line(expression))
-                            .font(.system(size: 15, design: .monospaced))
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                        Image(systemName: "chevron.up")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.dim)
-                            .accessibilityHidden(true)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        ForEach(rows) { row in
+                            rowView(row)
+                                .frame(height: 40)
+                                .id(row.id)
+                        }
                     }
-                    .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(line(expression).characters))
-                .accessibilityHint("Shows the whole sum")
+                .scrollTargetBehavior(.paging)
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: rows) {
+                    if let last = rows.last {
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
+                }
+            }
+            if showsClear {
                 Button("Clear", action: onClear)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .tint(.white)
-            } else {
-                Text("Sum: type a length, then + or −")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.dim)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.leading, 12)
@@ -211,8 +305,37 @@ private struct TapeLine: View {
         .themePanel()
     }
 
-    /// The sum, with " = total" in the accent after =.
-    private func line(_ expression: String) -> AttributedString {
+    @ViewBuilder
+    private func rowView(_ row: TapeRow) -> some View {
+        if let expression = row.expression {
+            Button(action: onOpen) {
+                HStack(spacing: 6) {
+                    Text(line(expression, total: row.total))
+                        .font(.system(size: 15, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.dim)
+                        .accessibilityHidden(true)
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(line(expression, total: row.total).characters))
+            .accessibilityHint("Shows the whole tape")
+        } else {
+            Text("Sum: type a length, then + or −")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.dim)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The sum, with " = total" in the accent once it has one.
+    private func line(_ expression: String, total: String?) -> AttributedString {
         var text = AttributedString(expression)
         if let total {
             text.append(AttributedString(" = "))
@@ -224,22 +347,23 @@ private struct TapeLine: View {
     }
 }
 
-/// The whole sum, one length per line, and the total. A standard sheet over the screen.
+/// The tape: the last finished sums, one length per line with each total, then the sum running
+/// now. A standard sheet over the screen; it opens at the newest.
 private struct TapeSheet: View {
     let converter: Converter
     let showsFeet: Bool
-    let onClear: () -> Void
+    let onClearAll: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Sum")
+                Text("Tape")
                     .font(.headline)
                 Spacer()
                 // Rarely needed, so small and out of the way; Done is at the bottom.
-                Button("Clear") {
-                    onClear()
+                Button("Clear all") {
+                    onClearAll()
                     dismiss()
                 }
                 .buttonStyle(.bordered)
@@ -252,14 +376,34 @@ private struct TapeSheet: View {
 
             ScrollView {
                 VStack(spacing: 0) {
-                    ForEach(Array(converter.tape.enumerated()), id: \.offset) { index, entry in
-                        row(entry, first: index == 0)
-                        Theme.edge.frame(height: 1)
+                    ForEach(Array(converter.history.enumerated()), id: \.offset) { index, calculation in
+                        if index > 0 { separator }
+                        entries(calculation.entries)
+                        TotalBlock(
+                            label: "Total",
+                            rounding: calculation.fractionRounding,
+                            isApproximate: calculation.fractionIsApproximate,
+                            fraction: calculation.fraction,
+                            unit: calculation.fractionUnit,
+                            otherUnits: calculation.otherUnits
+                        )
                     }
-                    total
+                    if converter.pendingSign != nil {
+                        if !converter.history.isEmpty { separator }
+                        entries(converter.tape)
+                        TotalBlock(
+                            label: "Subtotal",
+                            rounding: converter.fractionRoundingNote,
+                            isApproximate: converter.fractionRoundingNote != nil,
+                            fraction: converter.valueText(for: .fraction),
+                            unit: showsFeet ? "" : "in",
+                            otherUnits: "\(converter.valueText(for: .inches))\(showsFeet ? "" : " in") · \(converter.valueText(for: .centimeters)) cm"
+                        )
+                    }
                 }
                 .padding(.horizontal, 16)
             }
+            .defaultScrollAnchor(.bottom)
 
             Button {
                 dismiss()
@@ -277,8 +421,19 @@ private struct TapeSheet: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(Theme.panel)
         .preferredColorScheme(.dark)
-        .onChange(of: converter.tape.isEmpty) {
-            if converter.tape.isEmpty { dismiss() }
+    }
+
+    /// Between two sums.
+    private var separator: some View {
+        Theme.accent.opacity(0.35)
+            .frame(height: 2)
+            .padding(.vertical, 14)
+    }
+
+    private func entries(_ entries: [SumEntry]) -> some View {
+        ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+            row(entry, first: index == 0)
+            Theme.edge.frame(height: 1)
         }
     }
 
@@ -311,28 +466,39 @@ private struct TapeSheet: View {
         if entry.field == .centimeters { return "cm" }
         return entry.text.hasSuffix("\"") || entry.text.hasSuffix("'") ? "" : "in"
     }
+}
 
-    private var total: some View {
+/// A sum's total: the fraction large, how it was rounded, and the other two units.
+private struct TotalBlock: View {
+    let label: String
+    let rounding: String?
+    let isApproximate: Bool
+    let fraction: String
+    /// "in", or empty when the fraction carries its own feet and inch marks.
+    let unit: String
+    let otherUnits: String
+
+    var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
             HStack(alignment: .firstTextBaseline) {
-                Text(converter.sumFinished ? "Total" : "Subtotal")
+                Text(label)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.accent)
                 Spacer()
-                if let rounding = converter.fractionRoundingNote {
+                if let rounding {
                     Text(rounding)
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.dim)
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if converter.fractionRoundingNote != nil {
+                if isApproximate {
                     Text("≈").foregroundStyle(Theme.dim)
                 }
-                Text(converter.valueText(for: .fraction))
+                Text(fraction)
                     .foregroundStyle(Theme.accent)
-                if !showsFeet {
-                    Text("in")
+                if !unit.isEmpty {
+                    Text(unit)
                         .font(.system(size: 15, design: .monospaced))
                         .foregroundStyle(Theme.dim)
                 }
@@ -340,7 +506,7 @@ private struct TapeSheet: View {
             .font(.system(size: 34, weight: .medium, design: .monospaced))
             .lineLimit(1)
             .minimumScaleFactor(0.5)
-            Text("\(converter.valueText(for: .inches))\(showsFeet ? "" : " in") · \(converter.valueText(for: .centimeters)) cm")
+            Text(otherUnits)
                 .font(.system(size: 13, design: .monospaced))
                 .foregroundStyle(Theme.dim)
         }
@@ -349,8 +515,8 @@ private struct TapeSheet: View {
     }
 }
 
-/// Native bordered buttons that fill the rest of the screen: digits, Delete, − and + in the
-/// right-hand column, = the one prominent button.
+/// Native bordered buttons that fill the rest of the screen: digits, Delete (⌫), − and + in
+/// the right-hand column, = the one prominent button.
 private struct Numpad: View {
     let separatorLabel: String
     let separatorEnabled: Bool
@@ -365,11 +531,7 @@ private struct Numpad: View {
                 digitKey(7)
                 digitKey(8)
                 digitKey(9)
-                // Tap deletes the last character; hold empties all three fields. On release after
-                // a hold the tap also arrives, and deletes nothing from the empty number.
-                key("Delete") { onKey(.delete) }
-                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in onClear() })
-                    .accessibilityHint("Hold to empty all three fields")
+                deleteKey
             }
             GridRow {
                 digitKey(4)
@@ -416,6 +578,21 @@ private struct Numpad: View {
 
     private func digitKey(_ digit: Int) -> some View {
         key(String(digit), isFigure: true) { onKey(.digit(digit)) }
+    }
+
+    /// Tap deletes the character before the cursor; hold empties all three fields. On release
+    /// after a hold the tap also arrives, and deletes nothing from the empty number.
+    private var deleteKey: some View {
+        Button {
+            onKey(.delete)
+        } label: {
+            Image(systemName: "delete.left")
+                .font(.system(size: 28, weight: .medium))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in onClear() })
+        .accessibilityLabel("Delete")
+        .accessibilityHint("Hold to empty all three fields")
     }
 
     private func signKey(_ sign: SumSign, label: String) -> some View {

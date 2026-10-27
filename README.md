@@ -5,12 +5,13 @@ iPhone app that converts between decimal inches, fractional inches and centimete
 ## Using it
 
 - **Tap a field** to select it. The first key you press replaces the whole number.
-- **Hold a field** to edit it. Keys are added to the end of the current number.
+- **Hold a field** to edit it in place: a cursor appears (with a haptic tap) and follows your finger as you slide along the number. Keys go in at the cursor, and ⌫ deletes the character before it. Holding the field you are editing again moves the cursor without losing what you typed.
 - **The other two fields follow every key** you type, so there is nothing to press to convert. On the way to `2 7/16` they briefly show `2 7/1` (9"); input that can't be read yet, such as `3 5/`, leaves them at the last value they could read.
 - **=** ends typing and shows the field in full (`2.5` becomes `2.50`, `3 6/8` becomes `3 3/4`). During a sum, = shows the total.
-- **Delete**: tap removes the last character, hold empties all three fields (during a sum: the length being typed, and the others go back to the subtotal).
+- **⌫ (Delete)**: tap removes the character before the cursor, hold empties all three fields (during a sum: the length being typed, and the others go back to the subtotal).
 - **Inches / Feet + in** sets how the two inch fields show the length: `63.25` and `63 1/4`, or `5' 3.25"` and `5' 3 1/4"`. Under a foot the feet are left out (`11 1/2"`).
-- **1/8, 1/16, 1/32, 1/64** sets what the fraction field rounds to. A `≈` in front of the fraction means it is rounded, and the field's top line says by how much: "rounded 0.005" down". 15.88" shows ≈ 15 7/8 at every precision, because 56/64 is the closest 64th and reduces to 7/8; the note shows what is left over.
+- **1/8, 1/16, 1/32, 1/64** sets what the fraction field rounds to. 15.88" shows ≈ 15 7/8 at every precision, because 56/64 is the closest 64th and reduces to 7/8; the note shows what is left over.
+- **≈** in front of any field means its figures are rounded (two decimals, or the fraction's precision), and the field's top line says by how much: `rounded 0.005" down`, `rounded 0.002 cm up`. Typing 3 5/64 shows ≈ 3.08 in (rounded 0.002" up) and ≈ 7.82 cm.
 
 Both choices are remembered.
 
@@ -32,9 +33,9 @@ The **+** and **−** keys are in the right-hand column; the line above the nump
 
 1. Type a length in any field and press **+** (or **−**). The fields show the subtotal; type the next length, in any field. While you type it, the other two fields show the subtotal with it.
 2. **=** ends the sum: the three fields show the total, and the line ends with `= total`.
-3. After a total, **+** or **−** carries on from it; typing a new number starts over. **Clear** ends the sum.
+3. After a total, **+** or **−** carries on from it; typing a new number starts over. **Clear** on the sum line ends the sum.
 
-Fractions stay exact: `3 5/8 + 2 7/16 + 1 1/4` gives `7 5/16`, even at 1/8. With a length typed in centimeters or as a decimal, the total's fraction is rounded to the precision, with its note, unless it lands exactly on it. Tapping the sum line shows the whole sum, one length per line, with the total; **Done** at the bottom closes it, and the small **Clear** at the top ends the sum. Tapping another field while typing a length drops that length from the subtotal.
+Fractions stay exact: `3 5/8 + 2 7/16 + 1 1/4` gives `7 5/16`, even at 1/8. With a length typed in centimeters or as a decimal, the total's fraction is rounded to the precision, with its note, unless it lands exactly on it. The last 10 finished sums are kept, also after the app is closed. Swipe down on the sum line to go back through them, one at a time. Tapping it opens the tape: every kept sum, one length per line with its total, and the sum running now at the bottom; scroll up for older ones. **Done** at the bottom closes it; the small **Clear all** at the top empties the history. Tapping another field while typing a length drops that length from the subtotal.
 
 ### Typing feet
 
@@ -61,6 +62,6 @@ Requires Xcode 16 or later and iOS 17 or later on the phone.
 
 ## Code
 
-- `InchConverter/Converter.swift`: conversion, feet, fraction rounding and parsing, the numpad editing rules and the sum. Uses only Foundation.
-- `InchConverter/ContentView.swift`: the screen, fields, sum line and sheet, and numpad.
+- `InchConverter/Converter.swift`: conversion, feet, fraction rounding and parsing, the numpad editing rules with the cursor, the sum and its history. Uses only Foundation.
+- `InchConverter/ContentView.swift`: the screen, fields (with the cursor), sum line and tape, and numpad.
 - `InchConverter/Theme.swift`: colours, header band, panels.
