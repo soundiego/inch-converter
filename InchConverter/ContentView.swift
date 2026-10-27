@@ -211,7 +211,7 @@ private struct TapeLine: View {
         .themePanel()
     }
 
-    /// The sum, with " = total" in the accent after Enter.
+    /// The sum, with " = total" in the accent after =.
     private func line(_ expression: String) -> AttributedString {
         var text = AttributedString(expression)
         if let total {
@@ -237,9 +237,14 @@ private struct TapeSheet: View {
                 Text("Sum")
                     .font(.headline)
                 Spacer()
-                Button("Done") { dismiss() }
-                    .fontWeight(.semibold)
-                    .tint(Theme.accent)
+                // Rarely needed, so small and out of the way; Done is at the bottom.
+                Button("Clear") {
+                    onClear()
+                    dismiss()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.white)
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)
@@ -257,15 +262,15 @@ private struct TapeSheet: View {
             }
 
             Button {
-                onClear()
                 dismiss()
             } label: {
-                Text("Clear")
+                Text("Done")
+                    .fontWeight(.semibold)
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .tint(.white)
+            .tint(Theme.accentDeep)
             .padding(16)
         }
         .presentationDetents([.medium, .large])
@@ -345,7 +350,7 @@ private struct TapeSheet: View {
 }
 
 /// Native bordered buttons that fill the rest of the screen: digits, Delete, − and + in the
-/// right-hand column, Enter the one prominent button.
+/// right-hand column, = the one prominent button.
 private struct Numpad: View {
     let separatorLabel: String
     let separatorEnabled: Bool
@@ -360,11 +365,11 @@ private struct Numpad: View {
                 digitKey(7)
                 digitKey(8)
                 digitKey(9)
-                // Tap deletes the last character; hold clears the number. On release after a
-                // hold the tap also arrives, and deletes nothing from the empty number.
+                // Tap deletes the last character; hold empties all three fields. On release after
+                // a hold the tap also arrives, and deletes nothing from the empty number.
                 key("Delete") { onKey(.delete) }
                     .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in onClear() })
-                    .accessibilityHint("Hold to clear the number")
+                    .accessibilityHint("Hold to empty all three fields")
             }
             GridRow {
                 digitKey(4)
@@ -384,14 +389,14 @@ private struct Numpad: View {
                     digitKey(0)
                     key("Feet") { onKey(.feet) }
                         .disabled(!feetEnabled)
-                    enterKey
+                    equalsKey
                 }
             } else {
                 GridRow {
                     separatorKey
                     digitKey(0)
                         .gridCellColumns(2)
-                    enterKey
+                    equalsKey
                 }
             }
         }
@@ -425,17 +430,19 @@ private struct Numpad: View {
             .accessibilityLabel(separatorLabel)
     }
 
-    private var enterKey: some View {
+    /// Ends a sum with its total; otherwise ends typing. The other fields already follow every key.
+    private var equalsKey: some View {
         Button {
-            onKey(.enter)
+            onKey(.equals)
         } label: {
-            Text("Enter")
-                .font(.system(size: 22, weight: .semibold))
+            Text("=")
+                .font(.system(size: 40, weight: .medium, design: .monospaced))
                 .minimumScaleFactor(0.5)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .buttonStyle(.borderedProminent)
         .tint(Theme.accentDeep)
+        .accessibilityLabel("Equals")
     }
 }
 

@@ -23,7 +23,7 @@ enum NumpadKey: Hashable {
     case plus
     case minus
     case delete
-    case enter
+    case equals
 }
 
 /// An exact signed fraction in lowest terms, so that a sum of typed fractions stays exact.
@@ -132,16 +132,19 @@ struct SumEntry: Equatable {
 /// The length (stored in inches), the numpad editing state of the three fields, and the sum.
 ///
 /// Tapping a field selects it, so the next key replaces its whole value. Holding a field
-/// edits it, so keys append to the current value. Enter recalculates the other fields.
-/// + and − add the field's value to a sum; Enter then shows the total in all three fields.
+/// edits it, so keys append to the current value. The other fields follow every key.
+/// + and − add the field's value to a sum; = then shows the total in all three fields.
 struct Converter {
     static let centimetersPerInch = 2.54
     static let maxDraftLength = 16
 
-    private(set) var inches: Double = 1
+    /// Nil when the fields are empty (after holding Delete).
+    private(set) var inches: Double? = 1
     private(set) var activeField: Field = .inches
     private(set) var isEditing = false
     private(set) var draft = ""
+    /// True once a key changed the draft since the field was tapped or held.
+    private var hasTyped = false
     /// Denominator the fraction field rounds to: 8, 16, 32 or 64.
     var precision = 16 {
         didSet { fractionShowsExact = false }
@@ -152,7 +155,7 @@ struct Converter {
     private(set) var tape: [SumEntry] = []
     /// The sign pressed last, waiting for the next length. Nil when no sum is running.
     private(set) var pendingSign: SumSign?
-    /// True after Enter ended a sum: the fields show its total.
+    /// True after = ended a sum: the fields show its total.
     private(set) var sumFinished = false
     /// The length as an exact fraction, when it is one: typed as a fraction, or a sum of those.
     private var exact: Fraction? = Fraction(1, 1)
@@ -176,8 +179,9 @@ struct Converter {
         state(of: field) == .editing ? draft : valueText(for: field)
     }
 
-    /// The field's value, whatever is being typed.
+    /// The field's value, whatever is being typed; empty when the fields are empty.
     func valueText(for field: Field) -> String {
+        guard let inches, let shownFraction else { return "" }
         let length = abs(inches)
         let text: String
         let isZero: Bool
@@ -253,7 +257,7 @@ struct Converter {
         return parts.joined(separator: " ")
     }
 
-    /// The total after Enter, in the active field's unit.
+    /// The total after =, in the active field's unit.
     var tapeTotal: String? {
         guard sumFinished else { return nil }
         switch activeField {
@@ -287,22 +291,30 @@ struct Converter {
     // MARK: Actions
 
     mutating func select(_ field: Field) {
+        // A length typed but not added to a running sum is dropped from its subtotal.
+        if pendingSign != nil && hasTyped { applySum() }
         activeField = field
         isEditing = false
         draft = ""
+        hasTyped = false
     }
 
     /// Starts editing the field's current value instead of replacing it.
     mutating func edit(_ field: Field) {
+        if pendingSign != nil && hasTyped { applySum() }
         activeField = field
         draft = editable(field)
         isEditing = true
+        hasTyped = false
     }
 
+    /// Holding Delete: empties all three fields. During a sum they show the subtotal again.
     mutating func clear() {
         if sumFinished { clearSum() }
         isEditing = true
         draft = ""
+        hasTyped = true
+        updateFromDraft()
     }
 
     /// Ends the sum. The fields keep their values.
@@ -320,7 +332,7 @@ struct Converter {
         case .plus: addToSum(.plus)
         case .minus: addToSum(.minus)
         case .delete: deleteBackward()
-        case .enter: enter()
+        case .equals: equals()
         }
     }
 
@@ -328,7 +340,8 @@ struct Converter {
 
     /// The fraction field's value: the exact fraction as typed or summed, or the length rounded
     /// to the precision. `value` carries the length's sign.
-    private var shownFraction: (magnitude: MixedFraction, value: Double) {
+    private var shownFraction: (magnitude: MixedFraction, value: Double)? {
+        guard let inches else { return nil }
         if fractionShowsExact, let exact {
             return (MixedFraction(units: abs(exact.numerator), denominator: exact.denominator), exact.value)
         }
@@ -338,6 +351,7 @@ struct Converter {
 
     /// How far the fraction shown is from the length (positive: rounded up); nil when it is the length.
     private var fractionRounding: Double? {
+        guard let inches, let shownFraction else { return nil }
         let difference = shownFraction.value - inches
         return abs(difference) > 1e-9 ? difference : nil
     }
@@ -426,7 +440,7 @@ struct Converter {
 
     /// True when something new was typed: not an empty draft, nor a held field left as it was.
     private var hasNewInput: Bool {
-        isEditing && !draft.isEmpty && draft != editable(activeField)
+        isEditing && !draft.isEmpty && hasTyped
     }
 
     // MARK: Typing
@@ -439,6 +453,7 @@ struct Converter {
             isEditing = true
             draft = ""
         }
+        hasTyped = true
     }
 
     private mutating func type(_ digit: String) {
@@ -446,6 +461,7 @@ struct Converter {
         guard draft.count < Self.maxDraftLength else { return }
         if draftInches == "0" { draft.removeLast() }
         draft += digit
+        updateFromDraft()
     }
 
     private mutating func typeSeparator() {
@@ -457,12 +473,14 @@ struct Converter {
         // "5", Space, Space gives "5/" for a fraction without a whole number.
         if insertion == "/" && draft.hasSuffix(" ") { draft.removeLast() }
         draft += insertion
+        updateFromDraft()
     }
 
     private mutating func typeFeet() {
         guard feetKeyEnabled, draft.count < Self.maxDraftLength else { return }
         beginInput()
         draft += "' "
+        updateFromDraft()
     }
 
     private mutating func deleteBackward() {
@@ -473,23 +491,57 @@ struct Converter {
             } else if !draft.isEmpty {
                 draft.removeLast()
             }
+            hasTyped = true
+            updateFromDraft()
         } else {
             // The whole value is selected, so delete removes all of it.
             clear()
         }
     }
 
-    private mutating func setLength(_ value: Double, exact: Fraction?) {
+    /// Shows what is being typed in the other two fields at once: the length itself, or during
+    /// a sum the subtotal with it. An empty draft empties the fields (during a sum: the
+    /// subtotal); an unfinished one such as "3 5/" leaves them as they were.
+    private mutating func updateFromDraft() {
+        if draft.isEmpty {
+            if pendingSign != nil { applySum() } else { setLength(nil, exact: nil) }
+            return
+        }
+        guard !fractionLooksUnfinished else { return }
+        if let pending = pendingSign {
+            if let entry = typedEntry(sign: pending) { applySum(adding: entry) }
+        } else if let length = parse(draft, in: activeField) {
+            setLength(length.inches, exact: length.exact)
+        }
+    }
+
+    /// A fraction whose top is not below its bottom, such as "7/1" on the way to "7/16". The
+    /// fields wait for the next key instead of jumping to 7"; = still reads it as typed.
+    private var fractionLooksUnfinished: Bool {
+        guard activeField == .fraction, let slash = draft.lastIndex(of: "/") else { return false }
+        let top = draft[..<slash].split(separator: " ").last.flatMap { Int($0) }
+        let bottom = Int(draft[draft.index(after: slash)...])
+        guard let top, let bottom else { return false }
+        return top >= bottom
+    }
+
+    private mutating func setLength(_ value: Double?, exact: Fraction?) {
         inches = exact?.value ?? value
         self.exact = exact
         fractionShowsExact = exact != nil
     }
 
-    // MARK: Enter and the sum
+    // MARK: = and the sum
 
-    private mutating func enter() {
+    /// Ends the sum and shows its total; without a sum, ends typing (the value is already
+    /// everywhere) and shows the field's value in full, 2.5 as 2.50.
+    private mutating func equals() {
         guard let pending = pendingSign else {
-            commit()
+            // Read the draft in full: an improper fraction such as 10/8 is not shown while typed.
+            if hasNewInput, let length = parse(draft, in: activeField) {
+                setLength(length.inches, exact: length.exact)
+            }
+            select(activeField)
             return
         }
         if hasNewInput {
@@ -503,14 +555,6 @@ struct Converter {
         select(activeField)
     }
 
-    /// Recalculates the other fields from the active one. Invalid input reverts the field.
-    private mutating func commit() {
-        defer { select(activeField) }
-        // An unchanged draft would replace the stored value with its rounded display.
-        guard hasNewInput, let length = parse(draft, in: activeField) else { return }
-        setLength(length.inches, exact: length.exact)
-    }
-
     private mutating func addToSum(_ sign: SumSign) {
         if let pending = pendingSign {
             if hasNewInput {
@@ -520,7 +564,7 @@ struct Converter {
             // With nothing typed, a sign straight after another replaces it.
         } else {
             // A new sum starts with what the field holds: a typed length, or the value shown
-            // (after Enter, the total, so the sum carries on from it).
+            // (after =, the total, so the sum carries on from it).
             let entry = hasNewInput ? typedEntry(sign: .plus) : currentEntry
             guard let entry else { return }
             tape = [entry]
@@ -528,6 +572,7 @@ struct Converter {
         }
         pendingSign = sign
         applySum()
+        hasTyped = false
         select(activeField)
     }
 
@@ -539,18 +584,20 @@ struct Converter {
         return SumEntry(sign: sign, field: activeField, text: text, inches: length.inches, exact: length.exact)
     }
 
-    /// The value the active field shows, as the first entry of a sum.
-    private var currentEntry: SumEntry {
+    /// The value the active field shows, as the first entry of a sum; nil when it is empty.
+    private var currentEntry: SumEntry? {
+        guard let inches else { return nil }
         let rounded = activeField == .fraction && fractionRounding != nil
         return SumEntry(sign: .plus, field: activeField, text: (rounded ? "≈" : "") + valueText(for: activeField),
                         inches: inches, exact: exact)
     }
 
-    /// Shows the sum of the tape in the fields, exact while every entry is an exact fraction.
-    private mutating func applySum() {
+    /// Shows the sum of the tape, and of `extra` (the length being typed), in the fields; exact
+    /// while every length is an exact fraction.
+    private mutating func applySum(adding extra: SumEntry? = nil) {
         var total = 0.0
         var exactTotal: Fraction? = Fraction(0, 1)
-        for entry in tape {
+        for entry in tape + (extra.map { [$0] } ?? []) {
             total += entry.sign == .plus ? entry.inches : -entry.inches
             let signed = entry.sign == .plus ? entry.exact : entry.exact?.negated
             if let sum = exactTotal, let signed {
