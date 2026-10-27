@@ -501,28 +501,18 @@ struct Converter {
 
     /// Shows what is being typed in the other two fields at once: the length itself, or during
     /// a sum the subtotal with it. An empty draft empties the fields (during a sum: the
-    /// subtotal); an unfinished one such as "3 5/" leaves them as they were.
+    /// subtotal); one that can't be read, such as "3 5/", leaves them as they were. A fraction
+    /// on its way, "7/1" before "7/16", shows as it reads (7"): the fields may jump.
     private mutating func updateFromDraft() {
         if draft.isEmpty {
             if pendingSign != nil { applySum() } else { setLength(nil, exact: nil) }
             return
         }
-        guard !fractionLooksUnfinished else { return }
         if let pending = pendingSign {
             if let entry = typedEntry(sign: pending) { applySum(adding: entry) }
         } else if let length = parse(draft, in: activeField) {
             setLength(length.inches, exact: length.exact)
         }
-    }
-
-    /// A fraction whose top is not below its bottom, such as "7/1" on the way to "7/16". The
-    /// fields wait for the next key instead of jumping to 7"; = still reads it as typed.
-    private var fractionLooksUnfinished: Bool {
-        guard activeField == .fraction, let slash = draft.lastIndex(of: "/") else { return false }
-        let top = draft[..<slash].split(separator: " ").last.flatMap { Int($0) }
-        let bottom = Int(draft[draft.index(after: slash)...])
-        guard let top, let bottom else { return false }
-        return top >= bottom
     }
 
     private mutating func setLength(_ value: Double?, exact: Fraction?) {
@@ -537,10 +527,6 @@ struct Converter {
     /// everywhere) and shows the field's value in full, 2.5 as 2.50.
     private mutating func equals() {
         guard let pending = pendingSign else {
-            // Read the draft in full: an improper fraction such as 10/8 is not shown while typed.
-            if hasNewInput, let length = parse(draft, in: activeField) {
-                setLength(length.inches, exact: length.exact)
-            }
             select(activeField)
             return
         }

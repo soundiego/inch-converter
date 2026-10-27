@@ -6,8 +6,8 @@ iPhone app that converts between decimal inches, fractional inches and centimete
 
 - **Tap a field** to select it. The first key you press replaces the whole number.
 - **Hold a field** to edit it. Keys are added to the end of the current number.
-- **The other two fields follow every key** you type. While a fraction is unfinished (`3 5/`, or `7/1` on the way to `7/16`) they keep the last value they could read.
-- **=** ends typing and shows the field in full (`2.5` becomes `2.50`, `3 6/8` becomes `3 3/4`); it also reads an improper fraction such as `10/8`, which the other fields don't show while it is typed. During a sum, = shows the total.
+- **The other two fields follow every key** you type, so there is nothing to press to convert. On the way to `2 7/16` they briefly show `2 7/1` (9"); input that can't be read yet, such as `3 5/`, leaves them at the last value they could read.
+- **=** ends typing and shows the field in full (`2.5` becomes `2.50`, `3 6/8` becomes `3 3/4`). During a sum, = shows the total.
 - **Delete**: tap removes the last character, hold empties all three fields (during a sum: the length being typed, and the others go back to the subtotal).
 - **Inches / Feet + in** sets how the two inch fields show the length: `63.25` and `63 1/4`, or `5' 3.25"` and `5' 3 1/4"`. Under a foot the feet are left out (`11 1/2"`).
 - **1/8, 1/16, 1/32, 1/64** sets what the fraction field rounds to. A `≈` in front of the fraction means it is rounded, and the field's top line says by how much: "rounded 0.005" down". 15.88" shows ≈ 15 7/8 at every precision, because 56/64 is the closest 64th and reduces to 7/8; the note shows what is left over.
