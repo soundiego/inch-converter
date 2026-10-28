@@ -18,7 +18,7 @@ struct ContentView: View {
     @State private var holdEndedAt = Date.distantPast
 
     /// Finger travel on the keypad that moves the cursor one character.
-    private static let trackpadStep: CGFloat = 12
+    private static let trackpadStep: CGFloat = 20
 
     var body: some View {
         VStack(spacing: 0) {
