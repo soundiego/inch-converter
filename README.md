@@ -11,7 +11,7 @@ iPhone app that converts between decimal inches, fractional inches and centimete
 - **=** ends typing and shows the field in full (`2.5` becomes `2.50`, `3 6/8` becomes `3 3/4`). During a sum, = shows the total.
 - **⌫ (Delete)**: tap removes the character before the cursor, hold empties all three fields (during a sum: the length being typed, and the others go back to the subtotal).
 - **Inches / Feet + in** sets how the two inch fields show the length: `63.25` and `63 1/4`, or `5' 3.25"` and `5' 3 1/4"`. Under a foot the feet are left out (`11 1/2"`).
-- **1/8, 1/16, 1/32, 1/64** sets what the fraction field rounds to. 15.88" shows ≈ 15 7/8 at every precision, because 56/64 is the closest 64th and reduces to 7/8; the note shows what is left over.
+- **1/8, 1/16, 1/32, 1/64** sets what the fraction field rounds to, and the denominator it shows: 2.5" is `2 4/8`, `2 8/16`, `2 16/32` or `2 32/64`, as read on a ruler in those steps. Whole numbers stay whole (`2`). 15.88" shows ≈ 15 56/64 at 1/64; the note shows what is left over.
 - **≈** in front of any field means its figures are rounded (two decimals, or the fraction's precision), and the field's top line says by how much: `rounded 0.005" down`, `rounded 0.002 cm up`. Typing 3 5/64 shows ≈ 3.08 in (rounded 0.002" up) and ≈ 7.82 cm.
 
 Both choices are remembered.
@@ -26,7 +26,7 @@ In the fraction field the key left of `0` shows **Space** or **/**: the first pr
 | `5` Space `/` `8` | 5/8 |
 | `7` | 7 |
 
-A fraction you type stays as typed (reduced, so `3 6/8` shows `3 3/4`) until the value or the precision changes.
+Once typed, a fraction is shown in the selected denominator too: `3 5/8` at 1/16 shows `3 10/16`. One finer than the precision (`3 5/64` at 1/16) or in other steps (`1/3`) is shown exactly, in its own denominator, until the precision changes.
 
 ### Adding and subtracting
 

@@ -62,10 +62,11 @@ struct MixedFraction: Equatable {
     let numerator: Int
     let denominator: Int
 
-    /// `units` counts steps of 1/`denominator`: 29 units of 1/8 is 3 5/8.
-    init(units: Int, denominator: Int) {
+    /// `units` counts steps of 1/`denominator`: 29 units of 1/8 is 3 5/8. Not `reduced`, the
+    /// denominator stays: 40 units of 1/16 is 2 8/16, not 2 1/2.
+    init(units: Int, denominator: Int, reduced: Bool = true) {
         let remainder = units % denominator
-        let divisor = gcd(remainder, denominator)
+        let divisor = reduced ? gcd(remainder, denominator) : 1
         whole = units / denominator
         numerator = remainder / divisor
         self.denominator = denominator / divisor
@@ -215,10 +216,9 @@ struct Converter {
             text = withFeet(feet, decimal(hundredths: rest))
             isZero = hundredths == 0
         case .fraction:
-            let fraction = shownFraction.magnitude
-            let (feet, rest) = splitIntoFeet(fraction.units, unitsPerInch: fraction.denominator)
-            text = withFeet(feet, MixedFraction(units: rest, denominator: fraction.denominator).text)
-            isZero = fraction.units == 0
+            let (feet, rest) = splitIntoFeet(shownFraction.units, unitsPerInch: shownFraction.denominator)
+            text = withFeet(feet, MixedFraction(units: rest, denominator: shownFraction.denominator, reduced: false).text)
+            isZero = shownFraction.units == 0
         case .centimeters:
             let hundredths = Int((length * Self.centimetersPerInch * 100).rounded())
             text = decimal(hundredths: hundredths)
@@ -398,15 +398,19 @@ struct Converter {
 
     // MARK: Formatting
 
-    /// The fraction field's value: the exact fraction as typed or summed, or the length rounded
-    /// to the precision. `value` carries the length's sign.
-    private var shownFraction: (magnitude: MixedFraction, value: Double)? {
+    /// The fraction field's value in steps of 1/`denominator`, always in the selected
+    /// denominator when it can be (2.5 at 1/64 is 2 32/64, not 2 1/2): the exact fraction as
+    /// typed or summed (in its own denominator when finer, 3 5/64 at 1/16), or the length
+    /// rounded to the precision. `value` carries the length's sign.
+    private var shownFraction: (units: Int, denominator: Int, value: Double)? {
         guard let inches else { return nil }
         if fractionShowsExact, let exact {
-            return (MixedFraction(units: abs(exact.numerator), denominator: exact.denominator), exact.value)
+            let denominator = precision % exact.denominator == 0 ? precision : exact.denominator
+            return (abs(exact.numerator) * (denominator / exact.denominator), denominator, exact.value)
         }
-        let magnitude = MixedFraction(rounding: abs(inches), toNearest: precision)
-        return (magnitude, inches < 0 ? -magnitude.value : magnitude.value)
+        let units = Int((abs(inches) * Double(precision)).rounded())
+        let magnitude = Double(units) / Double(precision)
+        return (units, precision, inches < 0 ? -magnitude : magnitude)
     }
 
     /// How far the field's figures are from the length, in the field's unit (positive: rounded
