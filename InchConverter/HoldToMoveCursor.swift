@@ -1,7 +1,7 @@
 // Hold to move the cursor, as on the iPhone keyboard. A UIKit long press (UIKit's standard
 // 0.5 s) on the whole window: on a field it puts the cursor under the finger and follows it;
-// on the keypad (but ⌫, which keeps its own hold) it turns the keys into a trackpad. When it
-// begins, the touch is taken from the key or field under the finger, so nothing is typed.
+// on the keypad (but ⌫, which keeps its own hold) it turns the keys into a trackpad. It runs
+// alongside the key's or field's own gesture and cancels it when it begins, so nothing is typed.
 // SwiftUI's long press followed by a drag did not do this on the phone.
 import SwiftUI
 import UIKit
@@ -75,6 +75,9 @@ struct HoldToMoveCursor: UIViewRepresentable {
         var parent: HoldToMoveCursor?
         let recognizer = UILongPressGestureRecognizer()
         private var target: HoldTarget?
+        /// The app's own gestures on the same touch (a key's press), cancelled when the hold
+        /// begins so that the key is not typed.
+        private let rivals = NSHashTable<UIGestureRecognizer>.weakObjects()
 
         override init() {
             super.init()
@@ -97,18 +100,42 @@ struct HoldToMoveCursor: UIViewRepresentable {
             hitTarget(at: touch.location(in: nil)) != nil
         }
 
+        /// A key's button starts tracking its touch as the finger lands. Were the two exclusive,
+        /// the button would win and the hold would never begin (1.3.1: the keypad did not
+        /// become a trackpad). So both run, and the hold cancels the button when it begins.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            // The window's own (system) gestures are left alone.
+            if let view = other.view, view !== recognizer.view { rivals.add(other) }
+            return true
+        }
+
         @objc private func handle(_ recognizer: UILongPressGestureRecognizer) {
             let point = recognizer.location(in: nil)
             switch recognizer.state {
             case .began:
                 target = hitTarget(at: point)
-                if let target { parent?.onBegin(target, point) }
+                if let target {
+                    cancelRivals()
+                    parent?.onBegin(target, point)
+                }
             case .changed:
                 if let target { parent?.onMove(target, point) }
             default:
                 if target != nil { parent?.onEnd() }
                 target = nil
+                rivals.removeAllObjects()
             }
+        }
+
+        /// Turning a gesture off and on again cancels it: the key under the finger lets go,
+        /// unhighlighted, and types nothing.
+        private func cancelRivals() {
+            for other in rivals.allObjects where other !== recognizer && other.isEnabled {
+                other.isEnabled = false
+                other.isEnabled = true
+            }
+            rivals.removeAllObjects()
         }
 
         private func hitTarget(at point: CGPoint) -> HoldTarget? {
