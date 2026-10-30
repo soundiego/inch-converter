@@ -24,6 +24,7 @@ enum NumpadKey: Hashable {
     case minus
     case delete
     case equals
+    case half
 }
 
 /// An exact signed fraction in lowest terms, so that a sum of typed fractions stays exact.
@@ -393,6 +394,7 @@ struct Converter {
         case .minus: addToSum(.minus)
         case .delete: deleteBackward()
         case .equals: equals()
+        case .half: halve()
         }
     }
 
@@ -632,6 +634,56 @@ struct Converter {
         inches = exact?.value ?? value
         self.exact = exact
         fractionShowsExact = exact != nil
+    }
+
+    // MARK: /2
+
+    /// Halves the value shown. During a sum it halves the length being typed, which stays a
+    /// draft to add with +, − or =; with nothing typed in a sum it does nothing. After a
+    /// total, the half starts over, as a new number does.
+    private mutating func halve() {
+        if pendingSign != nil {
+            guard hasNewInput, let length = parse(draft, in: activeField) else { return }
+            draft = draftText(inches: length.inches / 2, exact: length.exact.map { Fraction($0.numerator, $0.denominator * 2) })
+            cursor = draft.count
+            updateFromDraft()
+            return
+        }
+        if sumFinished { clearSum() }
+        guard let inches else { return }
+        setLength(inches / 2, exact: exact.map { Fraction($0.numerator, $0.denominator * 2) })
+        // Keep the fraction exact even if it is finer than the precision: half of 3 5/64.
+        select(activeField)
+    }
+
+    /// A length written as it would be typed in the active field: an exact fraction in full
+    /// (1 13/16), decimals to four places at most (1.125).
+    private func draftText(inches value: Double, exact: Fraction?) -> String {
+        let sign = value < 0 ? "−" : ""
+        let length = abs(value)
+        switch activeField {
+        case .fraction:
+            let fraction = exact.map { MixedFraction(units: abs($0.numerator), denominator: $0.denominator) }
+                ?? MixedFraction(rounding: length, toNearest: precision)
+            guard showsFeet, fraction.units >= 12 * fraction.denominator else { return sign + fraction.text }
+            let perFoot = 12 * fraction.denominator
+            let rest = MixedFraction(units: fraction.units % perFoot, denominator: fraction.denominator)
+            return "\(sign)\(fraction.units / perFoot)' \(rest.text)"
+        case .inches:
+            guard showsFeet, length >= 12 else { return sign + shortDecimal(length) }
+            let feet = Int(length / 12)
+            return "\(sign)\(feet)' \(shortDecimal(length - Double(feet * 12)))"
+        case .centimeters:
+            return sign + shortDecimal(length * Self.centimetersPerInch)
+        }
+    }
+
+    /// Up to four decimals, without trailing zeros: 1.125, 2.5, 3.
+    private func shortDecimal(_ value: Double) -> String {
+        var text = String(format: "%.4f", value)
+        while text.hasSuffix("0") { text.removeLast() }
+        if text.hasSuffix(".") { text.removeLast() }
+        return text.replacingOccurrences(of: ".", with: decimalSeparator)
     }
 
     // MARK: = and the sum

@@ -545,8 +545,9 @@ private struct TotalBlock: View {
     }
 }
 
-/// Native bordered buttons that fill the rest of the screen: digits, Delete (⌫), − and + in
-/// the right-hand column, = the one prominent button.
+/// Native bordered buttons that fill the rest of the screen: digits on the left; ⌫, then
+/// −, +, = and /2 (shorter, four in the height of three rows) on the right. = is the one
+/// prominent button.
 private struct Numpad: View {
     let separatorLabel: String
     let separatorEnabled: Bool
@@ -556,40 +557,57 @@ private struct Numpad: View {
     let onClear: () -> Void
 
     var body: some View {
-        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-            GridRow {
-                digitKey(7)
-                digitKey(8)
-                digitKey(9)
-                deleteKey
-            }
-            GridRow {
-                digitKey(4)
-                digitKey(5)
-                digitKey(6)
-                signKey(.minus, label: "Minus")
-            }
-            GridRow {
-                digitKey(1)
-                digitKey(2)
-                digitKey(3)
-                signKey(.plus, label: "Plus")
-            }
-            if feetShown {
-                GridRow {
-                    separatorKey
-                    digitKey(0)
-                    key("Feet") { onKey(.feet) }
-                        .disabled(!feetEnabled)
-                    equalsKey
+        GeometryReader { geometry in
+            let spacing: CGFloat = 8
+            let keyWidth = (geometry.size.width - 3 * spacing) / 4
+            let rowHeight = (geometry.size.height - 3 * spacing) / 4
+            // Under ⌫, the height of three rows holds four keys: −, +, = and /2.
+            let shortHeight = (3 * rowHeight - spacing) / 4
+            HStack(alignment: .top, spacing: spacing) {
+                Grid(horizontalSpacing: spacing, verticalSpacing: spacing) {
+                    GridRow {
+                        digitKey(7)
+                        digitKey(8)
+                        digitKey(9)
+                    }
+                    GridRow {
+                        digitKey(4)
+                        digitKey(5)
+                        digitKey(6)
+                    }
+                    GridRow {
+                        digitKey(1)
+                        digitKey(2)
+                        digitKey(3)
+                    }
+                    if feetShown {
+                        GridRow {
+                            separatorKey
+                            digitKey(0)
+                            key("Feet") { onKey(.feet) }
+                                .disabled(!feetEnabled)
+                        }
+                    } else {
+                        GridRow {
+                            separatorKey
+                            digitKey(0)
+                            Color.clear
+                        }
+                    }
                 }
-            } else {
-                GridRow {
-                    separatorKey
-                    digitKey(0)
-                        .gridCellColumns(2)
+                VStack(spacing: spacing) {
+                    deleteKey
+                        .frame(height: rowHeight)
+                    signKey(.minus, label: "Minus")
+                        .frame(height: shortHeight)
+                    signKey(.plus, label: "Plus")
+                        .frame(height: shortHeight)
                     equalsKey
+                        .frame(height: shortHeight)
+                    halfKey
+                        .frame(height: shortHeight)
                 }
+                .frame(width: keyWidth)
             }
         }
         .buttonStyle(.bordered)
@@ -631,6 +649,13 @@ private struct Numpad: View {
         key(sign.symbol, isFigure: true) { onKey(sign == .plus ? .plus : .minus) }
             .tint(Theme.accent)
             .accessibilityLabel(label)
+    }
+
+    /// Halves the value shown, or the length being typed during a sum.
+    private var halfKey: some View {
+        key("/2", isFigure: true) { onKey(.half) }
+            .tint(Theme.accent)
+            .accessibilityLabel("Half")
     }
 
     private var separatorKey: some View {

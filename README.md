@@ -9,6 +9,7 @@ iPhone app that converts between decimal inches, fractional inches and centimete
 - **Hold the keypad** (any key but ⌫) and it becomes a trackpad, as on the iPhone keyboard: the keys fade, nothing is typed, and sliding left or right moves the cursor in the selected field, one character every 20 points.
 - **The other two fields follow every key** you type, so there is nothing to press to convert. On the way to `2 7/16` they briefly show `2 7/1` (9"); input that can't be read yet, such as `3 5/`, leaves them at the last value they could read.
 - **=** ends typing and shows the field in full (`2.5` becomes `2.50`, `3 6/8` becomes `3 3/4`). During a sum, = shows the total.
+- **/2** halves the value shown (15 7/8 becomes 7 15/16). During a sum it halves the length being typed, which you then add with +, − or =; after a total it halves the total and starts over.
 - **⌫ (Delete)**: tap removes the character before the cursor, hold empties all three fields (during a sum: the length being typed, and the others go back to the subtotal).
 - **Inches / Feet + in** sets how the two inch fields show the length: `63.25` and `63 1/4`, or `5' 3.25"` and `5' 3 1/4"`. Under a foot the feet are left out (`11 1/2"`).
 - **1/8, 1/16, 1/32, 1/64** sets what the fraction field rounds to, and the denominator it shows: 2.5" is `2 4/8`, `2 8/16`, `2 16/32` or `2 32/64`, as read on a ruler in those steps. Whole numbers stay whole (`2`). 15.88" shows ≈ 15 56/64 at 1/64; the note shows what is left over.
@@ -30,7 +31,7 @@ Once typed, a fraction is shown in the selected denominator too: `3 5/8` at 1/16
 
 ### Adding and subtracting
 
-The **+** and **−** keys are in the right-hand column; the line above the numpad shows the sum.
+The right-hand column holds ⌫, then **−**, **+**, **=** and **/2**; the line above the numpad shows the sum.
 
 1. Type a length in any field and press **+** (or **−**). The fields show the subtotal; type the next length, in any field. While you type it, the other two fields show the subtotal with it.
 2. **=** ends the sum: the three fields show the total, and the line ends with `= total`.
@@ -40,7 +41,7 @@ Fractions stay exact: `3 5/8 + 2 7/16 + 1 1/4` gives `7 5/16`, even at 1/8. With
 
 ### Typing feet
 
-With **Feet + in** chosen, a **Feet** key sits left of =. It follows a whole number:
+With **Feet + in** chosen, a **Feet** key sits right of 0. It follows a whole number:
 
 | Field | Keys | Result |
 | --- | --- | --- |
