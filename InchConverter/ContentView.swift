@@ -51,8 +51,8 @@ struct ContentView: View {
                 Numpad(
                     separatorLabel: converter.separatorKeyLabel,
                     separatorEnabled: converter.separatorKeyEnabled,
-                    feetShown: converter.feetKeyShown,
                     feetEnabled: converter.feetKeyEnabled,
+                    inchEnabled: converter.inchKeyEnabled,
                     onKey: { key in
                         if !holdIsRecent { converter.press(key) }
                     },
@@ -551,8 +551,8 @@ private struct TotalBlock: View {
 private struct Numpad: View {
     let separatorLabel: String
     let separatorEnabled: Bool
-    let feetShown: Bool
     let feetEnabled: Bool
+    let inchEnabled: Bool
     let onKey: (NumpadKey) -> Void
     let onClear: () -> Void
 
@@ -580,19 +580,18 @@ private struct Numpad: View {
                         digitKey(2)
                         digitKey(3)
                     }
-                    if feetShown {
-                        GridRow {
+                    // Four keys in the width of three: / (or the decimal point), 0, Feet, Inch,
+                    // as on a construction calculator: 5 Feet 3 Inch 1 / 2.
+                    GridRow {
+                        HStack(spacing: spacing) {
                             separatorKey
                             digitKey(0)
                             key("Feet") { onKey(.feet) }
                                 .disabled(!feetEnabled)
+                            key("Inch") { onKey(.inch) }
+                                .disabled(!inchEnabled)
                         }
-                    } else {
-                        GridRow {
-                            separatorKey
-                            digitKey(0)
-                            Color.clear
-                        }
+                        .gridCellColumns(3)
                     }
                 }
                 VStack(spacing: spacing) {
@@ -659,7 +658,7 @@ private struct Numpad: View {
     }
 
     private var separatorKey: some View {
-        key(separatorLabel, isFigure: separatorLabel != "Space") { onKey(.separator) }
+        key(separatorLabel, isFigure: true) { onKey(.separator) }
             .disabled(!separatorEnabled)
             .accessibilityLabel(separatorLabel)
     }

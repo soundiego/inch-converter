@@ -19,12 +19,13 @@ Both choices are remembered.
 
 ### Typing a fraction
 
-In the fraction field the key left of `0` shows **Space** or **/**: the first press adds the space after the whole number, the next adds the fraction slash.
+The bottom row of the keypad is **/** (the decimal point in the decimal fields), **0**, **Feet** and **Inch**, as on a construction calculator. In the fraction field, the number before **/** is the numerator and the one after it the denominator; **Inch** ends the whole inches before a fraction.
 
 | Keys | Result |
 | --- | --- |
-| `3` Space `5` `/` `8` | 3 5/8 |
-| `5` Space `/` `8` | 5/8 |
+| `3` `/` `8` | 3/8 |
+| `1` `5` `/` `8` | 1 7/8 (15/8) |
+| `3` Inch `5` `/` `8` | 3 5/8 |
 | `7` | 7 |
 
 Once typed, a fraction is shown in the selected denominator too: `3 5/8` at 1/16 shows `3 10/16`. One finer than the precision (`3 5/64` at 1/16) or in other steps (`1/3`) is shown exactly, in its own denominator, until the precision changes.
@@ -41,12 +42,12 @@ Fractions stay exact: `3 5/8 + 2 7/16 + 1 1/4` gives `7 5/16`, even at 1/8. With
 
 ### Typing feet
 
-With **Feet + in** chosen, a **Feet** key sits right of 0. It follows a whole number:
+**Feet** works in both inch fields, whichever display is chosen: with **Inches** shown, `5` Feet `3` gives 63". It follows a whole number. With **Feet + in** shown:
 
 | Field | Keys | Result |
 | --- | --- | --- |
 | Feet and inches | `5` Feet `3` `.` `2` `5` | 5' 3.25" |
-| Feet and inches, fraction | `5` Feet `3` Space `1` `/` `4` | 5' 3 1/4" |
+| Feet and inches, fraction | `5` Feet `3` Inch `1` `/` `4` | 5' 3 1/4" |
 | either | `6` `3` | 5' 3" (inches alone also work) |
 | either | `5` Feet | 5' 0" |
 

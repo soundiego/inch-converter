@@ -20,6 +20,7 @@ enum NumpadKey: Hashable {
     case digit(Int)
     case separator
     case feet
+    case inch
     case plus
     case minus
     case delete
@@ -302,20 +303,29 @@ struct Converter {
         return approximate + valueText(for: activeField) + unit
     }
 
-    /// For the fraction field the separator key types the space after the whole number,
-    /// then the fraction slash: 3, Space, 5, /, 8 gives "3 5/8".
+    /// The decimal point, or in the fraction field the fraction bar: 3, /, 8 gives 3/8.
     var separatorKeyLabel: String {
-        guard activeField == .fraction else { return decimalSeparator }
-        return separatorInsertion == "/" ? "/" : "Space"
+        activeField == .fraction ? "/" : decimalSeparator
     }
 
     var separatorKeyEnabled: Bool {
         separatorInsertion != nil
     }
 
-    /// The Feet key is on the numpad for the inch fields while feet are shown.
+    /// Feet can be typed in both inch fields, whether feet are shown or not: 5, Feet, 3 is 63"
+    /// either way.
     var feetKeyShown: Bool {
-        showsFeet && activeField != .centimeters
+        activeField != .centimeters
+    }
+
+    /// The Inch key ends the whole inches before a fraction: 2, Inch, 1, /, 2 gives 2 1/2. Only
+    /// the fraction field takes it.
+    var inchKeyEnabled: Bool {
+        guard activeField == .fraction, isEditing, !cursorAmongFeet else { return false }
+        let before = inchesPart(beforeCursor)
+        let after = draftInches.dropFirst(before.count)
+        return !before.isEmpty && before.allSatisfy(\.isNumber)
+            && !draftInches.contains(" ") && !after.hasPrefix("/")
     }
 
     /// The feet mark follows a whole number: 5, Feet, 3 gives 5' 3". With the cursor inside 53,
@@ -390,6 +400,7 @@ struct Converter {
         case .digit(let digit): type(String(digit))
         case .separator: typeSeparator()
         case .feet: typeFeet()
+        case .inch: typeInch()
         case .plus: addToSum(.plus)
         case .minus: addToSum(.minus)
         case .delete: deleteBackward()
@@ -523,21 +534,21 @@ struct Converter {
     /// rules look at the inches typed before the cursor and at the whole number.
     private var separatorInsertion: String? {
         guard isEditing else { return activeField == .fraction ? nil : decimalSeparator }
-        // Not among the feet: the cursor must be after "5' ".
-        if let mark = draft.firstIndex(of: "'"), cursor <= draft.distance(from: draft.startIndex, to: mark) + 1 {
-            return nil
-        }
-        let before = inchesPart(beforeCursor)
+        if cursorAmongFeet { return nil }
         guard activeField == .fraction else {
             return draftInches.contains(decimalSeparator) ? nil : decimalSeparator
         }
-        // A space after the whole number, then one slash: inside 35/8, after the 3, a space
-        // gives 3 5/8; nothing goes after the slash or right before it.
-        let after = draftInches.dropFirst(before.count)
-        if before.isEmpty || before.contains("/") { return nil }
-        if before.contains(" ") { return draftInches.contains("/") ? nil : "/" }
-        if draftInches.contains(" ") || after.hasPrefix("/") { return nil }
-        return " "
+        // One fraction bar, right after the numerator: 3/8, or 2 1/2 after the Inch key.
+        let before = inchesPart(beforeCursor)
+        let numerator = before.split(separator: " ", omittingEmptySubsequences: false).last ?? ""
+        if draftInches.contains("/") || numerator.isEmpty || !numerator.allSatisfy(\.isNumber) { return nil }
+        return "/"
+    }
+
+    /// The cursor is in the feet, or between their mark and its space: "5|' 3", "5'| 3".
+    private var cursorAmongFeet: Bool {
+        guard let mark = draft.firstIndex(of: "'") else { return false }
+        return cursor <= draft.distance(from: draft.startIndex, to: mark) + 1
     }
 
     private mutating func insert(_ text: String) {
@@ -585,9 +596,14 @@ struct Converter {
         guard draft.count < Self.maxDraftLength else { return }
         // Only decimal fields get here with no inches before the cursor: "," becomes "0,".
         if inchesPart(beforeCursor).isEmpty { insert("0") }
-        // "5", Space, Space gives "5/" for a fraction without a whole number.
-        if insertion == "/" && beforeCursor.hasSuffix(" ") { removeBeforeCursor(1) }
         insert(insertion)
+        updateFromDraft()
+    }
+
+    private mutating func typeInch() {
+        guard inchKeyEnabled, draft.count < Self.maxDraftLength else { return }
+        beginInput()
+        insert(" ")
         updateFromDraft()
     }
 
