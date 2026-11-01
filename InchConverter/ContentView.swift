@@ -546,7 +546,7 @@ private struct TotalBlock: View {
 }
 
 /// Native bordered buttons that fill the rest of the screen: digits on the left; ⌫, then
-/// −, +, = and /2 (shorter, four in the height of three rows) on the right. = is the one
+/// −, +, /2 and = (shorter, four in the height of three rows) on the right. = is the one
 /// prominent button.
 private struct Numpad: View {
     let separatorLabel: String
@@ -601,9 +601,9 @@ private struct Numpad: View {
                         .frame(height: shortHeight)
                     signKey(.plus, label: "Plus")
                         .frame(height: shortHeight)
-                    equalsKey
-                        .frame(height: shortHeight)
                     halfKey
+                        .frame(height: shortHeight)
+                    equalsKey
                         .frame(height: shortHeight)
                 }
                 .frame(width: keyWidth)
@@ -618,6 +618,8 @@ private struct Numpad: View {
         Button(action: action) {
             Text(title)
                 .font(isFigure ? .system(size: 40, weight: .medium, design: .monospaced) : .system(size: 20, weight: .semibold))
+                // One line: a narrow key shrinks "Feet" instead of breaking it.
+                .lineLimit(1)
                 .minimumScaleFactor(0.5)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

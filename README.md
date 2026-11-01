@@ -32,7 +32,7 @@ Once typed, a fraction is shown in the selected denominator too: `3 5/8` at 1/16
 
 ### Adding and subtracting
 
-The right-hand column holds ⌫, then **−**, **+**, **=** and **/2**; the line above the numpad shows the sum.
+The right-hand column holds ⌫, then **−**, **+**, **/2** and **=**; the line above the numpad shows the sum.
 
 1. Type a length in any field and press **+** (or **−**). The fields show the subtotal; type the next length, in any field. While you type it, the other two fields show the subtotal with it.
 2. **=** ends the sum: the three fields show the total, and the line ends with `= total`.
